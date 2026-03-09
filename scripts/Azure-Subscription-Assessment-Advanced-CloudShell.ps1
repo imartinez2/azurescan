@@ -446,7 +446,7 @@ function Get-NetworkTopologySummary {
 Resources
 | where subscriptionId =~ '$SubscriptionId'
 | where type in~ ('microsoft.network/virtualnetworks','microsoft.network/azurefirewalls','microsoft.network/applicationgateways','microsoft.network/loadbalancers','microsoft.network/networkwatchers','microsoft.network/virtualnetworkgateways','microsoft.network/privateendpoints','microsoft.network/publicipaddresses')
-| summarize Count=count() by type
+| summarize ResourceCount=count() by type
 | order by type asc
 "@
     Search-GraphSafe -Query $query -First 1000
@@ -622,7 +622,7 @@ foreach ($sub in $subscriptions) {
         $topCostsAll.Add([pscustomobject]@{ SubscriptionName=$sub.Name; SubscriptionId=$sub.Id; ResourceId=$item.ResourceId; ResourceType=$item.ResourceType; ResourceGroup=$item.ResourceGroup; Cost=$item.Cost; Currency=$item.Currency }) | Out-Null
     }
     foreach ($item in $networkTopology) {
-        $networkTopologyAll.Add([pscustomobject]@{ SubscriptionName=$sub.Name; SubscriptionId=$sub.Id; ResourceType=$item.type; Count=$item.Count }) | Out-Null
+        $networkTopologyAll.Add([pscustomobject]@{ SubscriptionName=$sub.Name; SubscriptionId=$sub.Id; ResourceType=$item.type; Count=$item.ResourceCount }) | Out-Null
     }
     $policySummaryAll.Add([pscustomobject]@{ SubscriptionName=$sub.Name; SubscriptionId=$sub.Id; PolicyAssignments=$policyAssignments.Count; LandingZoneScore=$landingZone.Score; LandingZoneTier=$landingZone.Tier }) | Out-Null
 
