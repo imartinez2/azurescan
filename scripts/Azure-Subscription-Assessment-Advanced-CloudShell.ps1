@@ -10,7 +10,6 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-Set-StrictMode -Version 2.0
 
 function Write-Status { param([string]$Message) Write-Host "[AzureScan] $Message" -ForegroundColor Cyan }
 
@@ -156,7 +155,8 @@ function Get-SecureScore {
     param([string]$SubscriptionId)
     try {
         $data = Invoke-AzRestJson -Method GET -Path "/subscriptions/$SubscriptionId/providers/Microsoft.Security/secureScores?api-version=2020-01-01-preview"
-        if ($null -eq $data -or $null -eq $data.value -or $data.value.Count -eq 0) { return $null }
+        $values = @($data.value)
+        if ($null -eq $data -or $null -eq $data.value -or $values.Count -eq 0) { return $null }
         $score = $data.value | Select-Object -First 1
         $current = if ($null -ne $score.properties.score.current) { [double]$score.properties.score.current } else { 0.0 }
         $max = if ($null -ne $score.properties.score.max) { [double]$score.properties.score.max } else { 0.0 }
@@ -215,11 +215,12 @@ function Get-CostLastNDays {
 
     try {
         $data = Invoke-AzRestJson -Method POST -Path "/subscriptions/$SubscriptionId/providers/Microsoft.CostManagement/query?api-version=2025-03-01" -Body $body
-        if ($null -eq $data.properties -or $null -eq $data.properties.rows -or $data.properties.rows.Count -eq 0) {
+        $rows = @($data.properties.rows)
+        if ($null -eq $data.properties -or $null -eq $data.properties.rows -or $rows.Count -eq 0) {
             return [pscustomobject]@{ Amount = [decimal]0; Currency = 'N/A'; From = $from; To = $to }
         }
-        $columns = $data.properties.columns
-        $row = $data.properties.rows | Select-Object -First 1
+        $columns = @($data.properties.columns)
+        $row = $rows | Select-Object -First 1
         $amountIndex = -1; $currencyIndex = -1
         for ($i = 0; $i -lt $columns.Count; $i++) {
             if ($columns[$i].name -eq 'totalCost') { $amountIndex = $i }
@@ -247,7 +248,7 @@ function Get-TopCostResources {
     try {
         $data = Invoke-AzRestJson -Method POST -Path "/subscriptions/$SubscriptionId/providers/Microsoft.CostManagement/query?api-version=2025-03-01" -Body $body
         if ($null -eq $data.properties -or $null -eq $data.properties.rows) { return @() }
-        $cols = $data.properties.columns
+        $cols = @($data.properties.columns)
         $idx = @{}
         for ($i = 0; $i -lt $cols.Count; $i++) { $idx[$cols[$i].name] = $i }
         return @($data.properties.rows | Select-Object -First $TopCount | ForEach-Object {

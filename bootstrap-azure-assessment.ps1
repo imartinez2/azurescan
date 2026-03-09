@@ -11,7 +11,6 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-Set-StrictMode -Version Latest
 
 function Write-Status {
     param([string]$Message)

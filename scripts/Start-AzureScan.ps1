@@ -11,7 +11,6 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-Set-StrictMode -Version Latest
 
 if (-not $OutputFolder) {
     $OutputFolder = Join-Path $HOME 'clouddrive/azurescan'
