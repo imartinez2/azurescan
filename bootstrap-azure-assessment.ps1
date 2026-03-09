@@ -7,7 +7,7 @@ param(
     [switch]$RefreshAdvisorRecommendations,
     [switch]$SkipExcel,
     [switch]$ForceModuleInstall,
-    [string]$AssessmentScriptUrl = 'https://REPLACE-WITH-YOUR-PUBLIC-URL/Azure-Subscription-Assessment-Advanced.ps1'
+    [string]$AssessmentScriptUrl = 'https://raw.githubusercontent.com/imartinez2/azurescan/main/scripts/Azure-Subscription-Assessment-Advanced-CloudShell.ps1'
 )
 
 $ErrorActionPreference = 'Stop'
