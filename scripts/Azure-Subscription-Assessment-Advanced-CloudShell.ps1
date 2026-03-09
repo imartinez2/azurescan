@@ -763,4 +763,10 @@ if ($excelAvailable) {
     Write-Warning 'ImportExcel is not available. Excel output was skipped, but CSV/JSON/HTML outputs were generated.'
 }
 
+$zipPath = Join-Path $OutputFolder 'AzureAssessment.zip'
+Remove-Item $zipPath -ErrorAction SilentlyContinue
+$filesToZip = Get-ChildItem -Path $OutputFolder -File | Where-Object { $_.Name -ne 'AzureAssessment.zip' }
+Compress-Archive -Path $filesToZip.FullName -DestinationPath $zipPath -Force
+Write-Status "ZIP package created at $zipPath"
+
 Write-Status "Assessment completed. Output folder: $OutputFolder"
