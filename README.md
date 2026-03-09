@@ -1,4 +1,4 @@
-# AzureScan
+# AzureScan Toolkit
 
 AzureScan is a Cloud Shell friendly Azure subscription assessment toolkit for:
 
