@@ -10,7 +10,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-Set-StrictMode -Version Latest
+Set-StrictMode -Version 2.0
 
 function Write-Status { param([string]$Message) Write-Host "[AzureScan] $Message" -ForegroundColor Cyan }
 
