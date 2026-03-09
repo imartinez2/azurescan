@@ -305,7 +305,7 @@ Resources
 | project name, type, resourceGroup, id
 | order by type asc, name asc
 "@
-    Search-GraphSafe -Query $query -First 5000
+    Search-GraphSafe -Query $query -First 1000
 }
 
 function Get-UnattachedDisks {
@@ -317,7 +317,7 @@ Resources
 | project name, resourceGroup, id, sku=tostring(sku.name), diskSizeGB=tostring(properties.diskSizeGB)
 | order by resourceGroup asc, name asc
 "@
-    Search-GraphSafe -Query $query -First 5000
+    Search-GraphSafe -Query $query -First 1000
 }
 
 function Get-UnattachedNics {
@@ -329,7 +329,7 @@ Resources
 | project name, resourceGroup, id
 | order by resourceGroup asc, name asc
 "@
-    Search-GraphSafe -Query $query -First 5000
+    Search-GraphSafe -Query $query -First 1000
 }
 
 function Get-IdlePublicIPs {
@@ -341,7 +341,7 @@ Resources
 | project name, resourceGroup, id, sku=tostring(sku.name), ipAddress=tostring(properties.ipAddress)
 | order by resourceGroup asc, name asc
 "@
-    Search-GraphSafe -Query $query -First 5000
+    Search-GraphSafe -Query $query -First 1000
 }
 
 function Get-OpenNsgRules {
@@ -362,7 +362,7 @@ Resources
 | project nsgName=name, resourceGroup, id, ruleName=tostring(rule.name), source, destinationPort, destinationPorts, priority=tostring(rule.properties.priority), protocol=tostring(rule.properties.protocol)
 | order by resourceGroup asc, nsgName asc, toint(priority) asc
 "@
-    Search-GraphSafe -Query $query -First 5000
+    Search-GraphSafe -Query $query -First 1000
 }
 
 function Get-AppServiceExposure {
@@ -378,7 +378,7 @@ Resources
 | project name, kind, resourceGroup, id, publicNetworkAccess, peCount, httpsOnly, clientCertEnabled, minTlsVersion
 | order by resourceGroup asc, name asc
 "@
-    Search-GraphSafe -Query $query -First 5000
+    Search-GraphSafe -Query $query -First 1000
 }
 
 function Get-StorageExposure {
@@ -394,7 +394,7 @@ Resources
 | project name, resourceGroup, id, publicNetworkAccess, supportsHttpsTrafficOnly, minTlsVersion, allowBlobPublicAccess, peCount
 | order by resourceGroup asc, name asc
 "@
-    Search-GraphSafe -Query $query -First 5000
+    Search-GraphSafe -Query $query -First 1000
 }
 
 function Get-KeyVaultExposure {
@@ -409,7 +409,7 @@ Resources
 | project name, resourceGroup, id, publicNetworkAccess, enablePurgeProtection, enableSoftDelete, peCount
 | order by resourceGroup asc, name asc
 "@
-    Search-GraphSafe -Query $query -First 5000
+    Search-GraphSafe -Query $query -First 1000
 }
 
 function Get-VMsWithoutBackup {
@@ -426,7 +426,7 @@ Resources
 | project name, resourceGroup, vmId=id
 | order by resourceGroup asc, name asc
 "@
-    Search-GraphSafe -Query $query -First 5000
+    Search-GraphSafe -Query $query -First 1000
 }
 
 function Get-PolicyCoverage {
@@ -447,10 +447,14 @@ function Get-NetworkTopologySummary {
 Resources
 | where subscriptionId =~ '$SubscriptionId'
 | where type in~ ('microsoft.network/virtualnetworks','microsoft.network/azurefirewalls','microsoft.network/applicationgateways','microsoft.network/loadbalancers','microsoft.network/networkwatchers','microsoft.network/virtualnetworkgateways','microsoft.network/privateendpoints','microsoft.network/publicipaddresses')
-| summarize ResourceCount=count() by type
-| order by type asc
+| project type
 "@
-    Search-GraphSafe -Query $query -First 1000
+    $raw = Search-GraphSafe -Query $query -First 1000
+    if (-not $raw -or $raw.Count -eq 0) { return @() }
+    $grouped = $raw | Group-Object -Property type
+    return @($grouped | ForEach-Object {
+        [pscustomobject]@{ type = $_.Name; ResourceCount = $_.Count }
+    })
 }
 
 function Get-EstimatedLandingZoneScore {
