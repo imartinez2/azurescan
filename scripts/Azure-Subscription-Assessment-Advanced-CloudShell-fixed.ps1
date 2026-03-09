@@ -266,7 +266,7 @@ function Get-TopCostResources {
         })
     }
     catch {
-        Write-Warning "Top cost query failed for $SubscriptionId: $($_.Exception.Message)"
+        Write-Warning ("Top cost query failed for subscription {0}: {1}" -f $SubscriptionId, $_.Exception.Message)
         return @()
     }
 }
