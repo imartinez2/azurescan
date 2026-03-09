@@ -475,6 +475,12 @@ function Get-EstimatedLandingZoneScore {
     [pscustomobject]@{ Score = $score; Tier = $tier }
 }
 
+function HtmlEncode {
+    param([string]$Text)
+    if ([string]::IsNullOrEmpty($Text)) { return '' }
+    $Text.Replace('&','&amp;').Replace('<','&lt;').Replace('>','&gt;').Replace('"','&quot;')
+}
+
 function Export-HtmlReport {
     param(
         [string]$Path,
@@ -482,41 +488,222 @@ function Export-HtmlReport {
         [array]$Findings,
         [array]$TopCosts,
         [array]$NetworkTopology,
+        [array]$Inventory,
+        [array]$PolicySummary,
         [object]$LandingZone
     )
 
-    $summaryHtml = $Summary | Select-Object SubscriptionName,SubscriptionId,SecureScorePercent,Last30DaysCost,Currency,TotalFindings,HighFindings,SecurityFindings,CostFindings,PerformanceFindings,LandingZoneScore,LandingZoneTier | ConvertTo-Html -Fragment
-    $highFindingsHtml = ($Findings | Where-Object Severity -eq 'High' | Select-Object SubscriptionName,Category,Source,Title,ResourceId,Recommendation | ConvertTo-Html -Fragment)
-    $topCostHtml = ($TopCosts | Select-Object -First 15 SubscriptionName,ResourceType,ResourceGroup,Cost,Currency,ResourceId | ConvertTo-Html -Fragment)
-    $topologyHtml = ($NetworkTopology | ConvertTo-Html -Fragment)
+    $totalFindings = ($Summary | Measure-Object -Property TotalFindings -Sum).Sum
+    $highFindings = ($Summary | Measure-Object -Property HighFindings -Sum).Sum
+    $mediumFindings = ($Summary | Measure-Object -Property MediumFindings -Sum).Sum
+    $lowFindings = ($Summary | Measure-Object -Property LowFindings -Sum).Sum
+    $securityFindings = ($Summary | Measure-Object -Property SecurityFindings -Sum).Sum
+    $costFindings = ($Summary | Measure-Object -Property CostFindings -Sum).Sum
+    $perfFindings = ($Summary | Measure-Object -Property PerformanceFindings -Sum).Sum
+    $relFindings = ($Summary | Measure-Object -Property ReliabilityFindings -Sum).Sum
+    $govFindings = ($Summary | Measure-Object -Property GovernanceFindings -Sum).Sum
+    $secureScore = if ($Summary.Count -gt 0 -and $null -ne $Summary[0].SecureScorePercent) { $Summary[0].SecureScorePercent } else { 'N/A' }
+    $totalCost = if ($Summary.Count -gt 0) { $Summary[0].Last30DaysCost } else { 0 }
+    $currency = if ($Summary.Count -gt 0 -and $Summary[0].Currency -ne 'N/A') { $Summary[0].Currency } else { 'USD' }
+    $scoreColor = if ($secureScore -ne 'N/A' -and $secureScore -lt 40) { '#dc3545' } elseif ($secureScore -ne 'N/A' -and $secureScore -lt 70) { '#f0ad4e' } else { '#28a745' }
+    $lzColor = if ($LandingZone.Score -lt 40) { '#dc3545' } elseif ($LandingZone.Score -lt 70) { '#f0ad4e' } else { '#28a745' }
+
+    $highGrouped = @($Findings | Where-Object Severity -eq 'High' | Group-Object -Property Title | Sort-Object Count -Descending | Select-Object -First 20)
+    $highTableRows = ''
+    foreach ($g in $highGrouped) {
+        $sample = $g.Group[0]
+        $count = $g.Count
+        $resSnippet = if ($count -gt 1) { "$count resources affected" } else { [string]$sample.ResourceId -replace '.*/',''}
+        $highTableRows += "<tr><td><span class='badge badge-high'>High</span></td><td>$(HtmlEncode($sample.Category))</td><td>$(HtmlEncode($g.Name))</td><td>$(HtmlEncode($resSnippet))</td><td>$(HtmlEncode([string]$sample.Recommendation))</td></tr>`n"
+    }
+
+    $medGrouped = @($Findings | Where-Object Severity -eq 'Medium' | Group-Object -Property Title | Sort-Object Count -Descending | Select-Object -First 15)
+    $medTableRows = ''
+    foreach ($g in $medGrouped) {
+        $sample = $g.Group[0]
+        $count = $g.Count
+        $resSnippet = if ($count -gt 1) { "$count resources affected" } else { [string]$sample.ResourceId -replace '.*/',''}
+        $medTableRows += "<tr><td><span class='badge badge-med'>Medium</span></td><td>$(HtmlEncode($sample.Category))</td><td>$(HtmlEncode($g.Name))</td><td>$(HtmlEncode($resSnippet))</td><td>$(HtmlEncode([string]$sample.Recommendation))</td></tr>`n"
+    }
+
+    $costRows = ''
+    foreach ($c in ($TopCosts | Select-Object -First 15)) {
+        $resName = [string]$c.ResourceId -replace '.*/',''; if (-not $resName) { $resName = '-' }
+        $costRows += "<tr><td>$(HtmlEncode($resName))</td><td>$(HtmlEncode([string]$c.ResourceType))</td><td>$(HtmlEncode([string]$c.ResourceGroup))</td><td class='num'>$($c.Cost)</td><td>$(HtmlEncode([string]$c.Currency))</td></tr>`n"
+    }
+    if (-not $costRows) { $costRows = "<tr><td colspan='5' class='empty'>No cost data available (Cost Management API may not be enabled)</td></tr>" }
+
+    $topoRows = ''
+    foreach ($t in $NetworkTopology) {
+        $friendlyType = [string]$t.ResourceType -replace 'microsoft.network/',''
+        $topoRows += "<tr><td>$(HtmlEncode($friendlyType))</td><td class='num'>$([int]$t.Count)</td></tr>`n"
+    }
+    if (-not $topoRows) { $topoRows = "<tr><td colspan='2' class='empty'>No network resources found</td></tr>" }
+
+    $invRows = ''
+    foreach ($inv in $Inventory) {
+        $invRows += "<tr><td>$(HtmlEncode([string]$inv.SubscriptionName))</td><td class='num'>$($inv.TotalResources)</td><td class='num'>$($inv.VirtualMachines)</td><td class='num'>$($inv.AppServices)</td><td class='num'>$($inv.SqlDatabases)</td><td class='num'>$($inv.StorageAccounts)</td><td class='num'>$($inv.KeyVaults)</td><td class='num'>$($inv.ManagedDisks)</td></tr>`n"
+    }
+
+    $polRows = ''
+    foreach ($p in $PolicySummary) {
+        $tierClass = switch ($p.LandingZoneTier) { 'Advanced' { 'tier-adv' } 'Intermediate' { 'tier-int' } default { 'tier-basic' } }
+        $polRows += "<tr><td>$(HtmlEncode([string]$p.SubscriptionName))</td><td class='num'>$($p.PolicyAssignments)</td><td class='num'>$($p.LandingZoneScore)</td><td><span class='$tierClass'>$(HtmlEncode([string]$p.LandingZoneTier))</span></td></tr>`n"
+    }
 
     $html = @"
-<html>
+<!DOCTYPE html>
+<html lang='en'>
 <head>
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0'>
 <title>AzureScan Assessment Report</title>
 <style>
-body { font-family: Segoe UI, Arial, sans-serif; margin: 24px; color: #222; }
-h1, h2, h3 { color: #0b5cab; }
-table { border-collapse: collapse; width: 100%; margin-bottom: 24px; }
-th, td { border: 1px solid #d0d7de; padding: 8px; text-align: left; font-size: 12px; }
-th { background: #f3f6fa; }
-.kpi { display: inline-block; padding: 12px 16px; margin-right: 12px; margin-bottom: 12px; border: 1px solid #d0d7de; border-radius: 8px; background: #fafcff; }
-.small { font-size: 12px; color: #555; }
+:root { --blue: #0078d4; --dark: #1b1b1b; --bg: #f5f6fa; --card: #ffffff; --border: #e1e4e8; --high: #dc3545; --med: #f0ad4e; --low: #17a2b8; --green: #28a745; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--dark); line-height: 1.5; }
+.header { background: linear-gradient(135deg, #0078d4 0%, #005a9e 100%); color: white; padding: 32px 40px; }
+.header h1 { font-size: 28px; font-weight: 600; margin-bottom: 4px; }
+.header p { opacity: 0.85; font-size: 13px; }
+.container { max-width: 1280px; margin: 0 auto; padding: 24px 40px 48px; }
+.kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 32px; margin-top: -40px; position: relative; z-index: 1; }
+.kpi-card { background: var(--card); border-radius: 10px; padding: 20px 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border-left: 4px solid var(--blue); }
+.kpi-card.high-accent { border-left-color: var(--high); }
+.kpi-card.med-accent { border-left-color: var(--med); }
+.kpi-card.green-accent { border-left-color: var(--green); }
+.kpi-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: #666; margin-bottom: 4px; }
+.kpi-value { font-size: 32px; font-weight: 700; color: var(--dark); }
+.kpi-value.colored { }
+.kpi-sub { font-size: 12px; color: #888; margin-top: 2px; }
+.section { background: var(--card); border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); padding: 24px 28px; margin-bottom: 24px; }
+.section h2 { font-size: 18px; font-weight: 600; color: var(--dark); margin-bottom: 16px; padding-bottom: 10px; border-bottom: 2px solid var(--blue); }
+.section h2 .count { font-weight: 400; color: #888; font-size: 14px; }
+table { border-collapse: collapse; width: 100%; }
+th { background: #f8f9fb; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.3px; color: #555; padding: 10px 12px; text-align: left; border-bottom: 2px solid var(--border); }
+td { padding: 9px 12px; font-size: 13px; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
+tr:hover td { background: #f8f9fb; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.empty { text-align: center; color: #999; padding: 20px; font-style: italic; }
+.badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+.badge-high { background: #fde8ea; color: var(--high); }
+.badge-med { background: #fff5e0; color: #b8860b; }
+.badge-low { background: #e0f4f7; color: #117a8b; }
+.tier-adv { background: #d4edda; color: #155724; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+.tier-int { background: #fff3cd; color: #856404; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+.tier-basic { background: #f8d7da; color: #721c24; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+.severity-bar { display: flex; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+.severity-pill { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.severity-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.dot-high { background: var(--high); }
+.dot-med { background: var(--med); }
+.dot-low { background: var(--low); }
+.dot-sec { background: #6f42c1; }
+.dot-cost { background: #fd7e14; }
+.dot-perf { background: #20c997; }
+.dot-rel { background: #0d6efd; }
+.dot-gov { background: #6c757d; }
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+@media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } .container { padding: 16px; } .header { padding: 24px 16px; } }
+.footer { text-align: center; padding: 24px; font-size: 12px; color: #999; }
 </style>
 </head>
 <body>
+<div class='header'>
 <h1>AzureScan Assessment Report</h1>
-<p class='small'>Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')</p>
-<div class='kpi'><strong>Landing Zone Score:</strong> $($LandingZone.Score)</div>
-<div class='kpi'><strong>Landing Zone Tier:</strong> $($LandingZone.Tier)</div>
-<h2>Executive Summary</h2>
-$summaryHtml
-<h2>Top High Severity Findings</h2>
-$highFindingsHtml
+<p>Generated $(Get-Date -Format 'MMMM dd, yyyy') at $(Get-Date -Format 'HH:mm:ss') UTC</p>
+</div>
+<div class='container'>
+
+<div class='kpi-grid'>
+<div class='kpi-card green-accent'>
+<div class='kpi-label'>Secure Score</div>
+<div class='kpi-value' style='color:$scoreColor'>$secureScore<span style='font-size:16px'>%</span></div>
+<div class='kpi-sub'>Microsoft Defender for Cloud</div>
+</div>
+<div class='kpi-card high-accent'>
+<div class='kpi-label'>Total Findings</div>
+<div class='kpi-value'>$totalFindings</div>
+<div class='kpi-sub'>$highFindings high / $mediumFindings medium / $lowFindings low</div>
+</div>
+<div class='kpi-card'>
+<div class='kpi-label'>30-Day Spend</div>
+<div class='kpi-value'>$(if ($totalCost -gt 0) { "$([math]::Round($totalCost,0))" } else { 'N/A' })</div>
+<div class='kpi-sub'>$currency via Cost Management</div>
+</div>
+<div class='kpi-card med-accent'>
+<div class='kpi-label'>Landing Zone Score</div>
+<div class='kpi-value' style='color:$lzColor'>$($LandingZone.Score)<span style='font-size:16px'>/100</span></div>
+<div class='kpi-sub'>$($LandingZone.Tier)</div>
+</div>
+</div>
+
+<div class='section'>
+<h2>Findings by Category</h2>
+<div class='severity-bar'>
+<div class='severity-pill'><span class='severity-dot dot-sec'></span> Security: $securityFindings</div>
+<div class='severity-pill'><span class='severity-dot dot-cost'></span> Cost: $costFindings</div>
+<div class='severity-pill'><span class='severity-dot dot-perf'></span> Performance: $perfFindings</div>
+<div class='severity-pill'><span class='severity-dot dot-rel'></span> Reliability: $relFindings</div>
+<div class='severity-pill'><span class='severity-dot dot-gov'></span> Governance: $govFindings</div>
+</div>
+<div class='severity-bar'>
+<div class='severity-pill'><span class='severity-dot dot-high'></span> High: $highFindings</div>
+<div class='severity-pill'><span class='severity-dot dot-med'></span> Medium: $mediumFindings</div>
+<div class='severity-pill'><span class='severity-dot dot-low'></span> Low / Info: $lowFindings</div>
+</div>
+</div>
+
+<div class='section'>
+<h2>High Severity Findings <span class='count'>($($highGrouped.Count) unique issues)</span></h2>
+<table>
+<tr><th style='width:70px'>Severity</th><th style='width:120px'>Category</th><th>Finding</th><th style='width:180px'>Scope</th><th>Recommendation</th></tr>
+$highTableRows
+</table>
+</div>
+
+<div class='section'>
+<h2>Medium Severity Findings <span class='count'>(top $($medGrouped.Count) issues)</span></h2>
+<table>
+<tr><th style='width:70px'>Severity</th><th style='width:120px'>Category</th><th>Finding</th><th style='width:180px'>Scope</th><th>Recommendation</th></tr>
+$medTableRows
+</table>
+</div>
+
+<div class='section'>
 <h2>Top Cost Drivers</h2>
-$topCostHtml
-<h2>Network Topology Summary</h2>
-$topologyHtml
+<table>
+<tr><th>Resource</th><th>Type</th><th>Resource Group</th><th style='text-align:right'>Cost</th><th>Currency</th></tr>
+$costRows
+</table>
+</div>
+
+<div class='two-col'>
+<div class='section'>
+<h2>Resource Inventory</h2>
+<table>
+<tr><th>Subscription</th><th style='text-align:right'>Total</th><th style='text-align:right'>VMs</th><th style='text-align:right'>App Svc</th><th style='text-align:right'>SQL DBs</th><th style='text-align:right'>Storage</th><th style='text-align:right'>KVs</th><th style='text-align:right'>Disks</th></tr>
+$invRows
+</table>
+</div>
+<div class='section'>
+<h2>Network Topology</h2>
+<table>
+<tr><th>Resource Type</th><th style='text-align:right'>Count</th></tr>
+$topoRows
+</table>
+</div>
+</div>
+
+<div class='section'>
+<h2>Governance &amp; Landing Zone</h2>
+<table>
+<tr><th>Subscription</th><th style='text-align:right'>Policy Assignments</th><th style='text-align:right'>LZ Score</th><th>Tier</th></tr>
+$polRows
+</table>
+</div>
+
+</div>
+<div class='footer'>AzureScan Assessment &middot; Generated by AzureScan Toolkit &middot; Read-only assessment</div>
 </body>
 </html>
 "@
@@ -623,7 +810,7 @@ foreach ($sub in $subscriptions) {
         $topCostsAll.Add([pscustomobject]@{ SubscriptionName=$sub.Name; SubscriptionId=$sub.Id; ResourceId=$item.ResourceId; ResourceType=$item.ResourceType; ResourceGroup=$item.ResourceGroup; Cost=$item.Cost; Currency=$item.Currency }) | Out-Null
     }
     foreach ($item in $networkTopology) {
-        $networkTopologyAll.Add([pscustomobject]@{ SubscriptionName=$sub.Name; SubscriptionId=$sub.Id; ResourceType=$item.type; Count=$item.ResourceCount }) | Out-Null
+        $networkTopologyAll.Add([pscustomobject]@{ SubscriptionName=$sub.Name; SubscriptionId=$sub.Id; ResourceType=[string]$item.type; Count=[int]$item.ResourceCount }) | Out-Null
     }
     $policySummaryAll.Add([pscustomobject]@{ SubscriptionName=$sub.Name; SubscriptionId=$sub.Id; PolicyAssignments=$policyAssignments.Count; LandingZoneScore=$landingZone.Score; LandingZoneTier=$landingZone.Tier }) | Out-Null
 
@@ -741,7 +928,7 @@ if (-not $SkipHtml) {
     } else {
         [pscustomobject]@{ Score = 0; Tier = 'Unknown' }
     }
-    Export-HtmlReport -Path $htmlReport -Summary $summary -Findings $findings -TopCosts $topCostsAll -NetworkTopology $networkTopologyAll -LandingZone $landingZoneOverall
+    Export-HtmlReport -Path $htmlReport -Summary $summary -Findings $findings -TopCosts $topCostsAll -NetworkTopology $networkTopologyAll -Inventory $inventoryAll -PolicySummary $policySummaryAll -LandingZone $landingZoneOverall
 }
 
 if ($excelAvailable) {
